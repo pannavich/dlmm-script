@@ -1,0 +1,11 @@
+{
+    "token0Address": "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
+    "token1Address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "poolAddress": "DbTk2SNKWxu9TJbPzmK9HcQCAmraBCFb5VMo8Svwh34z",
+    "totalBinRange": 20,
+    "rebalanceSlippage": 0.02,
+    "poolSlippage": 0.01,
+    "rebalanceMaxAttempts": 3,
+    "addLiquidityMaxAttempts": 3,
+    "removeLiquidityMaxAttempts": 3
+}
