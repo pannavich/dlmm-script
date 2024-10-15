@@ -8,7 +8,7 @@ import {
     sendAndConfirmRawTransaction
 } from "@solana/web3.js";
 import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
-import DLMM, { BinLiquidity, LbPosition, StrategyType } from "@meteora-ag/dlmm";
+import DLMM, { BinLiquidity, LbPosition, PositionInfo, StrategyType } from "@meteora-ag/dlmm";
 import { BN } from "@coral-xyz/anchor";
 import dotenv from 'dotenv';
   
@@ -295,14 +295,15 @@ async function rebalance(dlmmPool: DLMM, rebalanceSlippage: number) {
     } else {
         console.log("🚀 ~ No need to rebalance");
         return {
+            rebalanced: false,
             totalXAmount: new BN(token0Balance?.amount || 0),
             totalYAmount: new BN(token1Balance?.amount || 0)
         }
     }
 
     // Recalculate balances after swap
-    console.log("🚀 ~ Rebalanced: Waiting for 5 seconds");
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log("🚀 ~ Rebalanced: Waiting for 30 seconds");
+    await new Promise(resolve => setTimeout(resolve, 30000));
 
     const updatedToken0Balance = await getTokenAmount(token0);
     const updatedToken1Balance = await getTokenAmount(token1);
@@ -314,7 +315,7 @@ async function rebalance(dlmmPool: DLMM, rebalanceSlippage: number) {
     const totalXAmount = new BN(xAmount);
     const totalYAmount = totalXAmount.mul(new BN(Number(activeBinPricePerToken)));
 
-    return { totalXAmount, totalYAmount };
+    return { rebalanced: true, totalXAmount, totalYAmount };
 }
 
 async function getAllUserPositions(user: PublicKey) {
@@ -394,20 +395,33 @@ async function main() {
     while (true) {
         await delay(30000);
         // Check sol balance
-        const solBalance = await getSolBalance();
-        console.log("🚀 ~ solBalance:", solBalance);
+        try {
 
-        // If not enough SOL to create position, skip
-        if (solBalance < 0.07) {
-            console.log("Not enough SOL to create position");
+            const solBalance = await getSolBalance();
+            console.log("🚀 ~ solBalance:", solBalance);
+            
+            // If not enough SOL to create position, skip
+            if (solBalance < 0.07) {
+                console.log("Not enough SOL to create position");
+                continue;
+            }
+        } catch (error) {
+            console.log("🚀 ~ getSolBalance error:", JSON.parse(JSON.stringify(error)));
             continue;
         }
 
         // If no current position, check if there is a position and set it as current position
         if (!currentPosition) {
             // Check if there is a position 
-            const positionsMap = await getAllUserPositions(user.publicKey);
-            const position = positionsMap.get(dlmmPool.pubkey.toString());
+            let position: PositionInfo | undefined;
+            try {
+
+                const positionsMap = await getAllUserPositions(user.publicKey);
+                position = positionsMap.get(dlmmPool.pubkey.toString());
+            } catch (error) {
+                console.log("🚀 ~ get position error:", JSON.parse(JSON.stringify(error)));
+                continue;
+            }
             if (position) {
                 console.log("🚀 ~ Found position: ", position.lbPairPositionsData[0].publicKey.toString());
                 currentPosition = position.lbPairPositionsData[0].publicKey;
@@ -415,13 +429,14 @@ async function main() {
             } else {
                 let totalXAmount: BN | null = null;
                 let totalYAmount: BN | null = null;
+                let rebalanced = false;
 
                 // Check token0 and token1 balance and see if need to rebalance
                 let rebalanceAttempts = 0;
                 while (rebalanceAttempts < rebalanceMaxAttempts) {  
                     try {
                         rebalanceAttempts++;
-                        ({ totalXAmount, totalYAmount } = await rebalance(dlmmPool, rebalanceSlippage));
+                        ({ rebalanced, totalXAmount, totalYAmount } = await rebalance(dlmmPool, rebalanceSlippage));
                         break;
                     } catch (error) {
                         console.log("🚀 ~ rebalance (attempt " + rebalanceAttempts + ") error:", JSON.parse(JSON.stringify(error)));
@@ -433,6 +448,11 @@ async function main() {
                     continue;
                 } 
 
+                if (rebalanced) {
+                    await delay(30000);
+                }
+
+
                 // Create position
                 let addLiquidityAttempts = 0;
                 while (addLiquidityAttempts < addLiquidityMaxAttempts) {
@@ -440,7 +460,7 @@ async function main() {
                         addLiquidityAttempts++;
                         const updatedToken0Balance = await getTokenAmount(token0);
 
-                        const positionKeyPair = await createBalancePosition(dlmmPool, Math.floor(Number(updatedToken0Balance?.amount) * 0.9), Math.floor(totalBinRange/2), poolSlippage)
+                        const positionKeyPair = await createBalancePosition(dlmmPool, Math.floor(Number(updatedToken0Balance?.amount) * 0.95), Math.floor(totalBinRange/2), poolSlippage)
                         currentPosition = positionKeyPair.publicKey;
                         break;
                     } catch (error) {
@@ -454,7 +474,14 @@ async function main() {
                 }
             }
         } else {
-            if (await isPositionInRange(currentPosition, dlmmPool)) {
+            let posInRange = false
+            try {
+                posInRange = await isPositionInRange(currentPosition, dlmmPool);
+            } catch (error) {
+                console.log("🚀 ~ posInRange error:", JSON.parse(JSON.stringify(error)));
+                continue;
+            }
+            if (posInRange) {
                 console.log("🚀 ~ Position is in range");
             } else {
                 console.log("🥺 ~ Position is out of range");
